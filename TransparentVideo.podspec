@@ -17,7 +17,7 @@ Pod::Spec.new do |spec|
 
   spec.author       = { "Alexis Creuzot" => "alexis.creuzot@gmail.com" }
   # --- Platform
-  spec.platform     = :ios, "12.0"
+  spec.platform     = :ios, "11.0"
   spec.swift_versions = '5'
 
   # --- Source
