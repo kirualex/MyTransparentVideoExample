@@ -38,22 +38,19 @@ public class PlayerView: UIView {
     public var playerLayer: AVPlayerLayer {
         return layer as! AVPlayerLayer
     }
-    public var type : Repeat = .once {
-        didSet { setupEndCallback() }
-    }
+    public var type : Repeat = .once
     public private(set) var player: AVPlayer? {
         set { playerLayer.player = newValue }
         get { return playerLayer.player }
     }
     
     private var playerItemStatusObserver: NSKeyValueObservation?
-    private(set) var playerItem: AVPlayerItem? = nil {
-        didSet {
-            setupEndCallback()
-        }
-    }
+    private(set) var playerItem: AVPlayerItem? = nil
     
-    public func play(_ url: URL, isTransparent: Bool = false, type: Repeat = .once) {
+    private var startTime : CMTime = .zero
+    private var endTime : CMTime? = nil
+    
+    public func load(_ url: URL, isTransparent: Bool = false, type: Repeat = .once, playWhenReady: Bool = false) {
         
         self.type = type
         let playerItem = isTransparent ? createTransparentItem(url: url) : AVPlayerItem.init(url: url)
@@ -61,20 +58,23 @@ public class PlayerView: UIView {
             self.playerLayer.pixelBufferAttributes = [(kCVPixelBufferPixelFormatTypeKey as String): kCVPixelFormatType_32BGRA]
         }
         
-        let player = AVPlayer(playerItem: playerItem)
+        self.removeBoundaryTimeObserver()
         
+        let player = AVPlayer(playerItem: playerItem)
         self.player = player
         self.playerItem = playerItem
         
-        playerItemStatusObserver = playerItem.observe(\.status) { [weak self] item, _ in
+        playerItemStatusObserver = self.player?.currentItem?.observe(\.status) { [weak self] item, _ in
             guard let self = self else { return }
+            self.playerItemStatusObserver = nil
             switch item.status {
             case .failed:
                 self.delegate?.didFail(error: item.error!, playerView: self)
             case .readyToPlay:
-                self.player?.play()
-                self.playerItemStatusObserver = nil
-                self.delegate?.didStartPlayback(playerView: self)
+                
+                if playWhenReady {
+                    self.play(from: self.startTime, to: self.endTime, type: self.type)
+                }
             case .unknown:
                 break
             @unknown default:
@@ -83,36 +83,46 @@ public class PlayerView: UIView {
         }
     }
     
-    // MARK: - Looping Handler
+    public func play(_ url: URL, isTransparent: Bool = false, type: Repeat = .once) {
+        self.load(url, isTransparent: isTransparent, type: type, playWhenReady: true)
+    }
     
-    private var didPlayToEndTimeObsever: NSObjectProtocol? = nil {
-        willSet(newObserver) {
-            if let observer = didPlayToEndTimeObsever, didPlayToEndTimeObsever !== newObserver {
-                NotificationCenter.default.removeObserver(observer)
+    public func play(from startTime: CMTime = .zero, to endTime: CMTime? = nil, type: Repeat = .once) {
+        guard let player = player, let item = playerItem else { return }
+        let endTime = endTime ?? item.duration
+        
+        self.startTime = startTime
+        self.startTime = endTime
+        
+        player.pause()
+        player.seek(to: startTime, toleranceBefore: .zero, toleranceAfter: .zero)
+        self.addBoundaryTimeObserver(to:player, at: endTime)
+        player.play()
+        self.delegate?.didStartPlayback(playerView: self)
+    }
+    
+    //
+    var timeObserverToken: Any?
+    func addBoundaryTimeObserver(to player: AVPlayer, at time: CMTime) {
+        self.removeBoundaryTimeObserver()
+        self.timeObserverToken = player.addBoundaryTimeObserver(forTimes: [NSValue(time: time)], queue: .main) {
+            switch self.type {
+            case .loop:
+                self.play(from: self.startTime, to: self.endTime, type: self.type)
+                self.delegate?.didLoop(playerView: self)
+                break
+            case .once:
+                self.delegate?.didEndPlayback(playerView: self)
+                break
             }
         }
     }
     
-    private func setupEndCallback() {
-        
-        guard let playerItem = self.playerItem, let player = self.player else { return }
-        
-        didPlayToEndTimeObsever = NotificationCenter.default.addObserver(
-            forName: .AVPlayerItemDidPlayToEndTime, object: playerItem, queue: nil, using: { _ in
-                
-                switch self.type {
-                case .once:
-                    self.delegate?.didEndPlayback(playerView: self)
-                    break
-                case .loop:
-                    player.seek(to: CMTime.zero, toleranceBefore: CMTime.zero, toleranceAfter: CMTime.zero) { _ in
-                        player.play()
-                    }
-                    self.delegate?.didLoop(playerView: self)
-                    break
-                }
-                
-        })
+    func removeBoundaryTimeObserver() {
+        if let timeObserverToken = timeObserverToken {
+            self.player?.removeTimeObserver(timeObserverToken)
+            self.timeObserverToken = nil
+        }
     }
     
     deinit {
