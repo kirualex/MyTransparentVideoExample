@@ -83,14 +83,30 @@
 		FA78FF9B24545C0D00FDEA22 /* lib */ = {
 			isa = PBXGroup;
 			children = (
-				66E04679242E85320096DEE5 /* AlphaFrameFilter.metal */,
-				667F4C911FA3126A00F9A900 /* AlphaFrameFilter.swift */,
-				669678FA242E7BF00085D444 /* AVAsset+VideoSize.swift */,
 				667F4C8F1FA3071A00F9A900 /* PlayerView.swift */,
+				FA78FF9D24546C2200FDEA22 /* Filter */,
+				FA78FF9C24546C1800FDEA22 /* Extensions */,
+			);
+			path = lib;
+			sourceTree = "<group>";
+		};
+		FA78FF9C24546C1800FDEA22 /* Extensions */ = {
+			isa = PBXGroup;
+			children = (
+				669678FA242E7BF00085D444 /* AVAsset+VideoSize.swift */,
 				669678FC242E7CFB0085D444 /* CIImage+VerticalSplit.swift */,
 				66E04678242E85320096DEE5 /* CIKernel+DefaultMetalLibrary.swift */,
 			);
-			path = lib;
+			path = Extensions;
+			sourceTree = "<group>";
+		};
+		FA78FF9D24546C2200FDEA22 /* Filter */ = {
+			isa = PBXGroup;
+			children = (
+				66E04679242E85320096DEE5 /* AlphaFrameFilter.metal */,
+				667F4C911FA3126A00F9A900 /* AlphaFrameFilter.swift */,
+			);
+			path = Filter;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */

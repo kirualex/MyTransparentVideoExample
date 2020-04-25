@@ -17,12 +17,12 @@ Pod::Spec.new do |spec|
 
   spec.author       = { "Alexis Creuzot" => "alexis.creuzot@gmail.com" }
   # --- Platform
-  spec.platform     = :ios, "13.0"
+  spec.platform     = :ios, "12.0"
   spec.swift_versions = '5'
 
   # --- Source
   spec.source       = { :git => "https://github.com/kirualex/MyTransparentVideoExample.git", :tag => "#{spec.version}" }
-  spec.source_files = "MyTransparentVideoExample/lib/*.swift"
-  spec.frameworks   = "AVFoundation", "CoreImage"
+  spec.source_files = "MyTransparentVideoExample/lib/**/*.swift"
+  spec.frameworks   = "AVFoundation", "CoreImage", "Metal"
 
 end

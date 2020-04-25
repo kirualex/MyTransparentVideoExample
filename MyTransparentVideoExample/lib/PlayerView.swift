@@ -16,6 +16,14 @@ public protocol PlayerViewDelegate {
     func didEndPlayback(playerView: PlayerView)
 }
 
+// Make delegate methods optional
+public extension PlayerViewDelegate {
+    func didFail(error: Error,playerView: PlayerView) {}
+    func didStartPlayback(playerView: PlayerView) {}
+    func didLoop(playerView: PlayerView) {}
+    func didEndPlayback(playerView: PlayerView) {}
+}
+
 public class PlayerView: UIView {
     
     public enum Repeat {
@@ -131,6 +139,7 @@ extension PlayerView {
                 return request.finish(with: outputImage, context: nil)
             } catch {
                 print("Video composition error: %s", String(describing: error))
+                self.delegate?.didFail(error: error, playerView: self)
                 return request.finish(with: error)
             }
         })
