@@ -12,7 +12,6 @@ import UIKit
 public protocol PlayerViewDelegate {
     func didFail(error: Error,playerView: PlayerView)
     func didStartPlayback(playerView: PlayerView)
-    func didLoop(playerView: PlayerView)
     func didEndPlayback(playerView: PlayerView)
 }
 
@@ -20,16 +19,10 @@ public protocol PlayerViewDelegate {
 public extension PlayerViewDelegate {
     func didFail(error: Error,playerView: PlayerView) {}
     func didStartPlayback(playerView: PlayerView) {}
-    func didLoop(playerView: PlayerView) {}
     func didEndPlayback(playerView: PlayerView) {}
 }
 
 public class PlayerView: UIView {
-    
-    public enum Repeat {
-        case once
-        case loop
-    }
     
     public var delegate : PlayerViewDelegate?
     public override class var layerClass: AnyClass {
@@ -38,83 +31,81 @@ public class PlayerView: UIView {
     public var playerLayer: AVPlayerLayer {
         return layer as! AVPlayerLayer
     }
-    public var type : Repeat = .once
     public private(set) var player: AVPlayer? {
-        set { playerLayer.player = newValue }
+        set { playerLayer.player = newValue}
         get { return playerLayer.player }
     }
     
-    private var playerItemStatusObserver: NSKeyValueObservation?
-    private(set) var playerItem: AVPlayerItem? = nil
-    
+    private var playerItemContext = 0
+    private var playerItem: AVPlayerItem? = nil {
+        didSet{ self.player?.replaceCurrentItem(with: playerItem)}
+    }
     private var startTime : CMTime = .zero
-    private var endTime : CMTime? = nil
+    private var endTime : CMTime?
+    private var url: URL?
     
-    public func load(_ url: URL, isTransparent: Bool = false, type: Repeat = .once, playWhenReady: Bool = false) {
-        
-        self.type = type
-        let playerItem = isTransparent ? createTransparentItem(url: url) : AVPlayerItem.init(url: url)
+    // MARK: - Public API
+    
+    public var isPlaying: Bool {
+        guard let player = player else {return false}
+        return player.rate != 0 && player.error == nil
+    }
+    
+    public func unload() {
+        self.removeBoundaryTimeObserver()
+        self.playerItem = nil
+        self.player = nil
+    }
+    
+    public func load(_ url: URL, isTransparent: Bool = false) {
+        guard url != self.url else { return }
+        self.url = url
+        self.removeBoundaryTimeObserver()
+
+        let playerItem = isTransparent ? self.createTransparentItem(url: url) : AVPlayerItem(url: url)
         if isTransparent {
             self.playerLayer.pixelBufferAttributes = [(kCVPixelBufferPixelFormatTypeKey as String): kCVPixelFormatType_32BGRA]
         }
+        playerItem.addObserver(self,
+                               forKeyPath: #keyPath(AVPlayerItem.status),
+                               options: [.old, .new],
+                               context: &playerItemContext)
         
-        self.removeBoundaryTimeObserver()
-        
-        let player = AVPlayer(playerItem: playerItem)
-        self.player = player
         self.playerItem = playerItem
-        
-        playerItemStatusObserver = self.player?.currentItem?.observe(\.status) { [weak self] item, _ in
-            guard let self = self else { return }
-            self.playerItemStatusObserver = nil
-            switch item.status {
-            case .failed:
-                self.delegate?.didFail(error: item.error!, playerView: self)
-            case .readyToPlay:
-                
-                if playWhenReady {
-                    self.play(from: self.startTime, to: self.endTime, type: self.type)
-                }
-            case .unknown:
-                break
-            @unknown default:
-                fatalError()
-            }
+    }
+    
+    public func play(from startTime: CMTime = .zero, to endTime: CMTime? = nil) {
+        self.startTime = startTime
+        self.endTime = endTime
+        if let player = player {
+            self.playNow(from: player)
+        } else {
+            let player = AVPlayer(playerItem: playerItem)
+            self.player = player
         }
     }
     
-    public func play(_ url: URL, isTransparent: Bool = false, type: Repeat = .once) {
-        self.load(url, isTransparent: isTransparent, type: type, playWhenReady: true)
-    }
+    // MARK: - Private API
     
-    public func play(from startTime: CMTime = .zero, to endTime: CMTime? = nil, type: Repeat = .once) {
-        guard let player = player, let item = playerItem else { return }
-        let endTime = endTime ?? item.duration
-        
-        self.startTime = startTime
-        self.startTime = endTime
-        
-        player.pause()
-        player.seek(to: startTime, toleranceBefore: .zero, toleranceAfter: .zero)
-        self.addBoundaryTimeObserver(to:player, at: endTime)
-        player.play()
-        self.delegate?.didStartPlayback(playerView: self)
+    private func playNow(from player: AVPlayer) {
+        guard let item = self.playerItem else { return }
+        let end = self.endTime ?? item.duration
+        self.addBoundaryTimeObserver(to:player, at: end)
+        player.seek(to: self.startTime, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self]  _ in
+            guard let self = self else {return}
+            player.play()
+            self.delegate?.didStartPlayback(playerView: self)
+        }
     }
+
     
-    //
+    // MARK: - Time boundary
+    
     var timeObserverToken: Any?
     func addBoundaryTimeObserver(to player: AVPlayer, at time: CMTime) {
         self.removeBoundaryTimeObserver()
         self.timeObserverToken = player.addBoundaryTimeObserver(forTimes: [NSValue(time: time)], queue: .main) {
-            switch self.type {
-            case .loop:
-                self.play(from: self.startTime, to: self.endTime, type: self.type)
-                self.delegate?.didLoop(playerView: self)
-                break
-            case .once:
-                self.delegate?.didEndPlayback(playerView: self)
-                break
-            }
+            self.delegate?.didEndPlayback(playerView: self)
         }
     }
     
@@ -125,8 +116,50 @@ public class PlayerView: UIView {
         }
     }
     
+    // MARK: - Observe state
+    
+    override public func observeValue(forKeyPath keyPath: String?,
+                                      of object: Any?,
+                                      change: [NSKeyValueChangeKey : Any]?,
+                                      context: UnsafeMutableRawPointer?) {
+        
+        // Only handle observations for the playerItemContext
+        guard context == &playerItemContext else {
+            super.observeValue(forKeyPath: keyPath,
+                               of: object,
+                               change: change,
+                               context: context)
+            return
+        }
+        
+        if keyPath == #keyPath(AVPlayerItem.status) {
+            let status: AVPlayerItem.Status
+            if let statusNumber = change?[.newKey] as? NSNumber {
+                status = AVPlayerItem.Status(rawValue: statusNumber.intValue)!
+            } else {
+                status = .unknown
+            }
+            
+            // Switch over status value
+            switch status {
+            case .readyToPlay:
+                if let player = self.player {
+                    self.playNow(from: player)
+                }
+                break
+            case .failed:
+                self.delegate?.didFail(error: self.playerItem!.error!, playerView: self)
+                break
+            default:
+                print("Unknown")
+                break
+            }
+        }
+    }
+    
     deinit {
-        playerItem = nil
+        self.removeBoundaryTimeObserver()
+        self.player = nil
     }
 }
 
