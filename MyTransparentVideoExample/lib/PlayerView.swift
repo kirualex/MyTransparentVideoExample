@@ -47,11 +47,11 @@ public class PlayerView: UIView {
     
     // MARK: - Public API
     
-    public func load(_ url: URL, isTransparent: Bool = false) {
+    public func load(_ url: URL, isTransparent: Bool = false, tint: UIColor? = nil) {
         guard url != self.url else { return }
         self.url = url
         let playerItem = isTransparent
-            ? AVAsset(url: url).createTransparentItem()
+            ? AVAsset(url: url).createTransparentItem(withTint: tint)
             : AVPlayerItem(url: url)
         
         self.playerLayer.pixelBufferAttributes = [(kCVPixelBufferPixelFormatTypeKey as String): kCVPixelFormatType_32BGRA]
@@ -66,22 +66,8 @@ public class PlayerView: UIView {
         NotificationCenter.default.addObserver(self,
                                                selector: #selector(videoDidEnd),
                                                name: .AVPlayerItemDidPlayToEndTime,
-                                               object: nil)
+                                               object: self.player?.currentItem)
         
-    }
-    
-    public func pauseAt(percent: Double) {
-        guard let player = self.player, let item = player.currentItem, !isSeeking else { return }
-        let halfTime = CMTime.init(seconds: item.duration.seconds * percent, preferredTimescale: 30)
-        self.isSeeking = true
-        player.seek(to: halfTime, toleranceBefore: .zero, toleranceAfter: .zero) { success in
-            self.isSeeking = false
-            guard success else {
-                self.pauseAt(percent:percent)
-                return
-            }
-            player.pause()
-        }
     }
     
     public func play(from start: CMTime = .zero, atRate: Float = 1.0) {
@@ -115,19 +101,32 @@ public class PlayerView: UIView {
 
 public extension AVAsset {
     
-    func createTransparentItem() -> AVPlayerItem {
+    func createTransparentItem(withTint: UIColor? = nil) -> AVPlayerItem {
         let playerItem = AVPlayerItem(asset: self)
         playerItem.seekingWaitsForVideoCompositionRendering = true
-        playerItem.videoComposition = self.createVideoComposition()
+        playerItem.videoComposition = self.createVideoComposition(withTint: withTint)
         return playerItem
     }
     
-    func createVideoComposition() -> AVVideoComposition {
+    func createVideoComposition(withTint: UIColor? = nil) -> AVVideoComposition {
         let filter = AlphaFrameFilter(renderingMode: .builtInFilter)
+        
+        var bwFilter: CIFilter?
+        if let tint = withTint {
+            bwFilter = CIFilter(name: "CIColorMonochrome")!
+            bwFilter?.setValue(CIColor.init(color: tint), forKey: "inputColor")
+            bwFilter?.setValue(1.0, forKey: "inputIntensity")
+        }
+        
         let composition = AVMutableVideoComposition(asset: self, applyingCIFiltersWithHandler: { request in
             do {
                 let (inputImage, maskImage) = request.sourceImage.verticalSplit()
-                let outputImage = try filter.process(inputImage, mask: maskImage)
+                var outputImage = try filter.process(inputImage, mask: maskImage)
+                if let bwFilter = bwFilter {
+                    bwFilter.setValue(outputImage, forKey: "inputImage")
+                    outputImage = bwFilter.outputImage!
+                }
+                
                 return request.finish(with: outputImage, context: nil)
             } catch {
                 print("Video composition error: %s", String(describing: error))
